@@ -14,8 +14,12 @@ Spec targets:
 import pytest
 import torch
 import numpy as np
-from hsrc.block import compress_block, reconstruct_block_keys, reconstruct_block_values
-from hsrc.config import HSRCConfig
+from tests.imports import (
+    compress_block,
+    reconstruct_block_keys,
+    reconstruct_block_values,
+    HSRCConfig,
+)
 
 HEAD_DIM = 128
 ROPE_THETA = 10000.0

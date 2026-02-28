@@ -7,9 +7,15 @@ attention computation, memory tracking, and the DynamicCache-like API.
 import pytest
 import torch
 import numpy as np
-from hsrc.config import HSRCConfig
-from hsrc.cache import HSRCLayerCache, HSRCCache, _resize_buffer
-from hsrc.block import reconstruct_block_keys, reconstruct_block_values, _apply_rope_to_tensor
+from tests.imports import (
+    HSRCConfig,
+    HSRCLayerCache,
+    HSRCCache,
+    _resize_buffer,
+    reconstruct_block_keys,
+    reconstruct_block_values,
+    _apply_rope_to_tensor,
+)
 
 from tests.conftest import HEAD_DIM, N_KV_HEADS, BLOCK_SIZE, BOUNDARY_SIZE, _generate_kv_block
 

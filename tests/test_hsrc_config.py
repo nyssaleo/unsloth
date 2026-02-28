@@ -2,7 +2,7 @@
 Tests for HSRCConfig: validation, defaults, derived properties, edge cases.
 """
 import pytest
-from hsrc.config import HSRCConfig
+from tests.imports import HSRCConfig
 
 
 class TestHSRCConfigDefaults:

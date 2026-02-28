@@ -18,9 +18,10 @@ import types
 import numpy as np
 from unittest.mock import MagicMock, patch
 
-from hsrc.config import HSRCConfig
-from hsrc.cache import HSRCLayerCache, HSRCCache
-from hsrc.integration import (
+from tests.imports import (
+    HSRCConfig,
+    HSRCLayerCache,
+    HSRCCache,
     hsrc_attention_forward_inference,
     create_hsrc_model_forward,
 )

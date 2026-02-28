@@ -177,7 +177,29 @@ def compress_block(
     )
     
     # === Layer 3: Sparse Residual ===
-    # Compute final residual after SVD reconstruction
+    # CRITICAL: Detect needles from PRE-SVD residual, not post-SVD.
+    # SVD captures high-energy outliers first, making them invisible
+    # in the post-SVD residual. Pre-SVD detection catches them reliably.
+    
+    # Detect needles from interpolation residual (pre-SVD)
+    pre_svd_norms = torch.norm(K_residual, dim=1)  # [i_len]
+    median_norm = torch.median(pre_svd_norms)
+    threshold = median_norm * sparse_threshold_mult
+    
+    above_threshold = torch.where(pre_svd_norms > threshold)[0]
+    
+    if above_threshold.numel() > max_sparse:
+        _, top_idx = torch.topk(pre_svd_norms[above_threshold], max_sparse)
+        sparse_positions = above_threshold[top_idx]
+    else:
+        sparse_positions = above_threshold
+    
+    if sparse_positions.numel() > 0:
+        sparse_positions, _ = torch.sort(sparse_positions)
+    
+    # Now compute the ACTUAL sparse corrections as the full residual
+    # after interpolation + SVD at the needle positions.
+    # This accounts for whatever SVD did (or didn't) capture.
     if use_int8:
         K_after_svd = K_interp + (C_K_int8.float() * scale_K) @ B_K.float()
     else:
@@ -190,24 +212,7 @@ def compress_block(
         V_after_svd = V_interp + C_V_f32 @ B_V.float()
     V_final_residual = V_f32[i_start:i_end] - V_after_svd
     
-    # Detect needles by L2 norm of key residual
-    row_norms = torch.norm(K_final_residual, dim=1)  # [i_len]
-    median_norm = torch.median(row_norms)
-    threshold = median_norm * sparse_threshold_mult
-    
-    # Find tokens exceeding threshold
-    above_threshold = torch.where(row_norms > threshold)[0]
-    
-    if above_threshold.numel() > max_sparse:
-        # Keep only the top-max_sparse by norm
-        _, top_idx = torch.topk(row_norms[above_threshold], max_sparse)
-        sparse_positions = above_threshold[top_idx]
-    else:
-        sparse_positions = above_threshold
-    
-    # Sort positions for deterministic ordering
     if sparse_positions.numel() > 0:
-        sparse_positions, _ = torch.sort(sparse_positions)
         sparse_K_vals = K_final_residual[sparse_positions].to(torch.float16).contiguous()
         sparse_V_vals = V_final_residual[sparse_positions].to(torch.float16).contiguous()
         sparse_idx = sparse_positions.to(torch.int32).contiguous()

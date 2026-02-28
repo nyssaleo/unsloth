@@ -118,7 +118,7 @@ def hsrc_attention_forward_inference(
         Qn = fast_linear_forward(self.q_proj, Xn, out=self.temp_QA[0])
         Kn = fast_linear_forward(self.k_proj, Xn, out=self.temp_KV[0])
         Vn = fast_linear_forward(self.v_proj, Xn, out=self.temp_KV[1])
-    except ImportError:
+    except (ImportError, RuntimeError, OSError):
         Qn = self.q_proj(Xn)
         Kn = self.k_proj(Xn)
         Vn = self.v_proj(Xn)
@@ -205,7 +205,7 @@ def hsrc_attention_forward_inference(
     try:
         from unsloth.models.llama import fast_linear_forward
         A = fast_linear_forward(self.o_proj, A, out=self.temp_O)
-    except ImportError:
+    except (ImportError, RuntimeError, OSError):
         A = self.o_proj(A)
     
     # Return format matching Unsloth: (output, (K_cache, V_cache))
@@ -260,7 +260,7 @@ def create_hsrc_model_forward(
         )
         try:
             from unsloth.models.llama import move_to_device
-        except ImportError:
+        except (ImportError, RuntimeError, OSError):
             def move_to_device(idx, *args):
                 return args
         
