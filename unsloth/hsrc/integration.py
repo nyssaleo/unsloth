@@ -35,6 +35,7 @@ from .cache import HSRCCache, HSRCLayerCache
 from .block import _apply_rope_to_tensor
 
 
+@torch.inference_mode()
 def hsrc_attention_forward_inference(
     self,
     hidden_states: torch.Tensor,
