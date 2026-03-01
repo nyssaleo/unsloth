@@ -366,6 +366,10 @@ class HSRCCache:
         For HSRC, we need PRE-RoPE keys. We undo the RoPE rotation
         using the inverse (cos, -sin), then store in the HSRC cache.
         
+        Handles both RoPE formats:
+          - [seq_len, head_dim/2]: mathematical convention
+          - [seq_len, head_dim]:   Unsloth convention (cat((cos,cos), dim=-1))
+        
         This is a one-time conversion at the start of decode.
         """
         num_layers = len(past_key_values)
@@ -375,6 +379,7 @@ class HSRCCache:
         
         device = K0.device
         dtype = K0.dtype
+        h = head_dim // 2
         
         cache = HSRCCache(config, num_layers, n_kv_heads, head_dim, device, dtype)
         
@@ -382,40 +387,54 @@ class HSRCCache:
         for layer in cache.layers:
             layer.set_rope_cache(cos, sin)
         
-        # For each layer, undo RoPE on keys and feed into HSRC
-        h = head_dim // 2
+        # Prepare RoPE tables for un-rotation
+        cos_seq = cos[:seq_len].float()  # [seq_len, D] or [seq_len, D/2]
+        sin_seq = sin[:seq_len].float()
+        
+        # Auto-detect Unsloth doubled format: [T, D] → take first half
+        if cos_seq.shape[-1] == head_dim:
+            cos_seq = cos_seq[:, :h]  # [seq_len, h]
+            sin_seq = sin_seq[:, :h]
+        
+        # Broadcast for vectorized un-rotation: [1, seq_len, h]
+        cos_b = cos_seq.unsqueeze(0)
+        sin_b = sin_seq.unsqueeze(0)
+        
         for layer_idx in range(num_layers):
             K_post, V = past_key_values[layer_idx]
             # K_post: [1, n_kv_heads, seq_len, head_dim] — post-RoPE
             # V: [1, n_kv_heads, seq_len, head_dim]
             
-            K_post_sq = K_post.squeeze(0)  # [n_kv_heads, seq_len, head_dim]
-            V_sq = V.squeeze(0)
+            K_post_f = K_post.squeeze(0).float()  # [n_kv_heads, seq_len, head_dim]
+            V_sq = V.squeeze(0)                    # [n_kv_heads, seq_len, head_dim]
             
-            # Undo RoPE: inverse rotation is (cos, -sin)
-            cos_seq = cos[:seq_len]  # [seq_len, h]
-            sin_seq = sin[:seq_len]
+            # Vectorized inverse RoPE: undo rotation with (cos, -sin)
+            # Forward:  post[:h] = pre[:h]*cos - pre[h:]*sin
+            #           post[h:] = pre[h:]*cos + pre[:h]*sin
+            # Inverse:  pre[:h] = post[:h]*cos + post[h:]*sin
+            #           pre[h:] = post[h:]*cos - post[:h]*sin
+            k0 = K_post_f[:, :, :h]  # [n_kv_heads, seq_len, h]
+            k1 = K_post_f[:, :, h:]
             
-            for t in range(seq_len):
-                cos_t = cos_seq[t]  # [h]
-                sin_t = sin_seq[t]
-                
-                for hi in range(n_kv_heads):
-                    k_post = K_post_sq[hi, t, :].float()  # [D]
-                    # Inverse RoPE: apply rotation with -sin
-                    k0 = k_post[:h]
-                    k1 = k_post[h:]
-                    k_pre_0 = k0 * cos_t + k1 * sin_t   # cos * k0 + sin * k1
-                    k_pre_1 = k1 * cos_t - k0 * sin_t   # cos * k1 - sin * k0
-                    K_pre = torch.cat([k_pre_0, k_pre_1])
-                    
-                    cache.layers[layer_idx].K_hot[t, hi, :] = K_pre.to(dtype)
-                    cache.layers[layer_idx].V_hot[t, hi, :] = V_sq[hi, t, :].to(dtype)
+            K_pre = torch.empty_like(K_post_f)
+            K_pre[:, :, :h] = k0 * cos_b + k1 * sin_b
+            K_pre[:, :, h:] = k1 * cos_b - k0 * sin_b
             
-            cache.layers[layer_idx].hot_len = seq_len
+            # Ensure hot buffer is large enough
+            layer_cache = cache.layers[layer_idx]
+            if seq_len > layer_cache.K_hot.shape[0]:
+                new_size = seq_len + config.block_size  # Extra room
+                layer_cache.K_hot = _resize_buffer(layer_cache.K_hot, new_size)
+                layer_cache.V_hot = _resize_buffer(layer_cache.V_hot, new_size)
+            
+            # Store in hot buffer: K_hot is [max_hot, n_kv_heads, head_dim]
+            # K_pre is [n_kv_heads, seq_len, head_dim] → permute to [seq_len, n_kv_heads, head_dim]
+            layer_cache.K_hot[:seq_len] = K_pre.permute(1, 0, 2).to(dtype)
+            layer_cache.V_hot[:seq_len] = V_sq.permute(1, 0, 2).to(dtype)
+            layer_cache.hot_len = seq_len
             
             # Trigger compression of full blocks
-            cache.layers[layer_idx]._maybe_compress()
+            layer_cache._maybe_compress()
         
         return cache
 
