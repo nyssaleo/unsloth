@@ -41,8 +41,9 @@ class MockRotaryEmb:
         pos = torch.arange(max_len, dtype=torch.float64)
         freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, dtype=torch.float64) / head_dim))
         angles = torch.outer(pos, freqs)
-        self._cos = angles.cos().float()  # [max_len, h]
-        self._sin = angles.sin().float()
+        # Unsloth doubled format: [max_len, head_dim] with repeated halves
+        self._cos = torch.cat((angles.cos(), angles.cos()), dim=-1).float()
+        self._sin = torch.cat((angles.sin(), angles.sin()), dim=-1).float()
     
     def extend_rope_embedding(self, x, seq_len):
         pass
@@ -79,6 +80,8 @@ class MockAttention(nn.Module):
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         
         self.rotary_emb = MockRotaryEmb(head_dim)
+        self.half_head_dim = head_dim // 2
+        self.RH_Q = torch.zeros(1, n_heads, 1, head_dim)
 
 
 def _make_config(**overrides):

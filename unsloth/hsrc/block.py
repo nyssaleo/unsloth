@@ -412,6 +412,11 @@ def _apply_rope_to_tensor(
     cos = cos[:T]  # [T, h]
     sin = sin[:T]  # [T, h]
     
+    # Handle Unsloth doubled format: [T, D] → take first half
+    if cos.shape[-1] == D:
+        cos = cos[:, :h]
+        sin = sin[:, :h]
+    
     x0 = x[:, :h]
     x1 = x[:, h:]
     
